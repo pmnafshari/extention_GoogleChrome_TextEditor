@@ -6,10 +6,11 @@
     "permissions": [
         "storage",
         "downloads",
-        "tabs"
+        "tabs",
+        "activeTab"
     ],
     "host_permissions": [
-        "https://content.dropboxapi.com/*"
+        "https://drive.google.com/*"
     ],
     "action": {
         "default_popup": "popup.html",

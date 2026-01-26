@@ -244,7 +244,13 @@ function downloadFile() {
     const filename = document.getElementById('filename-input').value || 'document';
     const content = isCodeMode && codeMirrorInstance ? codeMirrorInstance.getValue() : document.getElementById('text-editor').value;
 
-    let blob, mimeType, finalFilename;
+    if (format === 'pdf') {
+        generatePDF(content, filename);
+        hideDownloadModal();
+        return;
+    }
+
+    let blob, finalFilename;
 
     switch (format) {
         case 'txt':
@@ -280,19 +286,17 @@ function downloadFile() {
             blob = new Blob([rtfContent], { type: 'application/rtf' });
             finalFilename = `${filename}.rtf`;
             break;
-
-        case 'pdf':
-            generatePDF(content, filename);
-            hideDownloadModal();
-            return;
     }
 
+    // Create download link and trigger it
     const url = URL.createObjectURL(blob);
-    chrome.downloads.download({
-        url: url,
-        filename: finalFilename,
-        saveAs: true
-    });
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = finalFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 
     hideDownloadModal();
 }
@@ -317,36 +321,28 @@ function hideCloudModal() {
 }
 
 function saveToGoogleDrive() {
-    chrome.identity.getAuthToken({ interactive: true }, (token) => {
-        if (chrome.runtime.lastError || !token) {
-            alert('Failed to authenticate with Google Drive');
-            return;
+    hideCloudModal();
+
+    // First, download the file
+    const content = isCodeMode && codeMirrorInstance ? codeMirrorInstance.getValue() : document.getElementById('text-editor').value;
+    const filename = `CloudWrite_${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // Show a helpful message
+    setTimeout(() => {
+        if (confirm('File downloaded! Click OK to open Google Drive and upload it.')) {
+            window.open('https://drive.google.com/drive/my-drive', '_blank');
         }
-
-        const content = isCodeMode && codeMirrorInstance ? codeMirrorInstance.getValue() : document.getElementById('text-editor').value;
-        const metadata = {
-            name: `CloudWrite_${Date.now()}.txt`,
-            mimeType: 'text/plain'
-        };
-
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', new Blob([content], { type: 'text/plain' }));
-
-        fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-            method: 'POST',
-            headers: new Headers({ 'Authorization': 'Bearer ' + token }),
-            body: form
-        })
-            .then(response => response.json())
-            .then(data => {
-                alert('File saved to Google Drive successfully!');
-                hideCloudModal();
-            })
-            .catch(error => {
-                alert('Error saving to Google Drive: ' + error.message);
-            });
-    });
+    }, 500);
 }
 
 function saveToDropbox() {
