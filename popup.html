@@ -16,7 +16,7 @@
         }
 
         body {
-            width: 800px;
+            width: 640px;
             height: 600px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
@@ -34,8 +34,8 @@
 
         .toolbar {
             display: flex;
-            gap: 8px;
-            padding: 12px;
+            gap: 6px;
+            padding: 8px;
             border-bottom: 1px solid #ddd;
             flex-wrap: wrap;
             align-items: center;
@@ -48,9 +48,9 @@
 
         .toolbar-group {
             display: flex;
-            gap: 4px;
+            gap: 3px;
             align-items: center;
-            padding: 0 8px;
+            padding: 0 6px;
             border-right: 1px solid #ddd;
         }
 
@@ -64,12 +64,12 @@
 
         button,
         select {
-            padding: 6px 12px;
+            padding: 4px 8px;
             border: 1px solid #ccc;
-            border-radius: 4px;
+            border-radius: 3px;
             background: white;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 11px;
             transition: all 0.2s;
         }
 
@@ -96,8 +96,86 @@
             border-color: #007acc;
         }
 
+        .tabs-container {
+            display: flex;
+            background: #e0e0e0;
+            border-bottom: 1px solid #ccc;
+            overflow-x: auto;
+            padding: 4px 4px 0 4px;
+        }
+
+        body.dark-mode .tabs-container {
+            background: #2d2d30;
+            border-bottom-color: #444;
+        }
+
+        .tab {
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            border-bottom: none;
+            background: #f5f5f5;
+            cursor: pointer;
+            font-size: 11px;
+            border-radius: 4px 4px 0 0;
+            margin-right: 2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        body.dark-mode .tab {
+            background: #1e1e1e;
+            border-color: #444;
+            color: #ccc;
+        }
+
+        .tab.active {
+            background: white;
+            border-bottom: 2px solid white;
+        }
+
+        body.dark-mode .tab.active {
+            background: #1e1e1e;
+            border-bottom: 2px solid #1e1e1e;
+            color: #e4e4e4;
+        }
+
+        .tab:hover {
+            background: #e8e8e8;
+        }
+
+        body.dark-mode .tab:hover {
+            background: #2a2a2a;
+        }
+
+        .tab-close {
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 4px;
+            border-radius: 2px;
+        }
+
+        .tab-close:hover {
+            background: #ff4444;
+            color: white;
+        }
+
+        .new-tab-btn {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px dashed #999;
+            cursor: pointer;
+            font-size: 11px;
+            border-radius: 4px 4px 0 0;
+        }
+
+        .new-tab-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
         #editor-container {
-            height: calc(100% - 120px);
+            height: calc(100% - 155px);
             overflow: auto;
             padding: 20px;
         }
@@ -108,26 +186,47 @@
             border: none;
             outline: none;
             font-family: inherit;
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.6;
             background: transparent;
             color: inherit;
             resize: none;
         }
 
+        #text-editor.code-mode {
+            font-family: 'Ubuntu Mono', 'Consolas', 'Monaco', monospace;
+            background: #300a24;
+            color: #ffffff;
+            padding: 12px;
+            border-radius: 4px;
+            line-height: 1.4;
+            font-size: 13px;
+        }
+
+        body.light-mode #text-editor.code-mode {
+            background: #300a24;
+            color: #ffffff;
+        }
+
         .CodeMirror {
             height: 100%;
-            font-size: 14px;
+            font-size: 13px;
+            font-family: 'Ubuntu Mono', 'Consolas', 'Monaco', monospace !important;
+        }
+
+        .CodeMirror.cm-s-monokai {
+            background: #300a24 !important;
         }
 
         #font-select {
-            min-width: 150px;
+            min-width: 120px;
+            font-size: 11px;
         }
 
         .status-bar {
-            padding: 8px 12px;
+            padding: 6px 12px;
             border-top: 1px solid #ddd;
-            font-size: 12px;
+            font-size: 11px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -176,6 +275,16 @@
             background: #2d2d2d;
         }
 
+        body.dark-mode #github-setup {
+            background: #3c3c3c !important;
+        }
+
+        body.dark-mode #github-token,
+        body.dark-mode #cloud-url {
+            background: #252526;
+            color: #e4e4e4;
+        }
+
         .modal-content h3 {
             margin-bottom: 16px;
         }
@@ -203,30 +312,43 @@
         </div>
 
         <div class="toolbar-group">
+            <button id="bullet-btn" title="Bullet List">• List</button>
+            <button id="number-btn" title="Numbered List">Numbers</button>
+        </div>
+
+        <div class="toolbar-group">
             <select id="font-select">
                 <option value="'Segoe UI', Arial, sans-serif">Segoe UI</option>
                 <option value="'Roboto', sans-serif">Roboto</option>
-                <option value="'Playfair Display', serif">Playfair Display</option>
+                <option value="'Playfair Display', serif">Playfair</option>
                 <option value="'Montserrat', sans-serif">Montserrat</option>
                 <option value="'Poppins', sans-serif">Poppins</option>
-                <option value="'Courier New', monospace">Courier New</option>
+                <option value="'Courier New', monospace">Courier</option>
                 <option value="'Georgia', serif">Georgia</option>
-                <option value="'Comic Sans MS', cursive">Comic Sans MS</option>
             </select>
         </div>
 
         <div class="toolbar-group">
-            <button id="theme-toggle" title="Toggle Theme">🌓 Theme</button>
+            <button id="theme-toggle" title="Toggle Theme">🌓</button>
         </div>
 
         <div class="toolbar-group">
-            <button id="mode-toggle" title="Switch Editor Mode">📝 Text</button>
+            <button id="mode-toggle" title="Switch Editor Mode">📝</button>
         </div>
 
         <div class="toolbar-group">
-            <button id="download-btn" title="Download">💾 Download</button>
-            <button id="cloud-btn" title="Save to Cloud">☁️ Cloud</button>
+            <button id="download-btn" title="Download">💾</button>
+            <button id="cloud-btn" title="Save to Cloud">☁️</button>
+            <button id="lock-btn" title="Lock/Unlock">🔒</button>
         </div>
+    </div>
+
+    <div class="tabs-container">
+        <div class="tab active" data-tab-id="0">
+            <span class="tab-name">Tab 1</span>
+            <span class="tab-close">×</span>
+        </div>
+        <button class="new-tab-btn" id="new-tab-btn">+ New Tab</button>
     </div>
 
     <div id="editor-container">
@@ -262,11 +384,63 @@
     <div id="cloud-modal" class="modal">
         <div class="modal-content">
             <h3>Save to Cloud</h3>
+            <p style="font-size: 12px; color: #666; margin-bottom: 12px;">Save your document to the cloud for free</p>
             <div class="cloud-buttons">
-                <button id="save-gdrive">📁 Google Drive</button>
-                <button id="save-dropbox">📦 Dropbox</button>
+                <button id="save-github">🐙 GitHub Gist (Free)</button>
+                <button id="save-pastebin">📋 Pastebin (Free)</button>
+            </div>
+            <div id="github-setup"
+                style="display: none; margin-top: 16px; padding: 12px; background: #f0f0f0; border-radius: 4px;">
+                <p style="font-size: 12px; margin-bottom: 8px;">First time? Enter your GitHub token:</p>
+                <input type="password" id="github-token" placeholder="GitHub Personal Access Token"
+                    style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 8px;">
+                <a href="https://github.com/settings/tokens/new?scopes=gist&description=CloudWrite%20Extension"
+                    target="_blank" style="font-size: 11px; color: #007acc;">Get Token (Click here)</a>
+                <button id="save-github-token" style="margin-top: 8px; width: 100%;">Save Token</button>
+            </div>
+            <div id="cloud-result" style="margin-top: 12px; display: none;">
+                <p style="font-size: 12px; color: #28a745; margin-bottom: 8px;">✅ Saved successfully!</p>
+                <input type="text" id="cloud-url" readonly
+                    style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 11px;">
+                <button id="copy-url" style="margin-top: 8px; width: 100%;">📋 Copy Link</button>
+                <button id="open-url" style="margin-top: 4px; width: 100%;">🔗 Open in Browser</button>
             </div>
             <button id="cancel-cloud" style="margin-top: 16px;">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Lock/Password Modal -->
+    <div id="lock-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="lock-modal-title">🔒 Set Password Protection</h3>
+            <p style="font-size: 12px; color: #666; margin-bottom: 12px;">Protect your documents with a password</p>
+            <div id="lock-setup">
+                <input type="password" id="password-input" placeholder="Enter password"
+                    style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 8px;">
+                <input type="password" id="password-confirm" placeholder="Confirm password"
+                    style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 8px;">
+                <button id="set-password-btn" style="width: 100%;">🔒 Set Password</button>
+                <button id="remove-password-btn" style="width: 100%; margin-top: 8px; display: none;">🔓 Remove
+                    Password</button>
+            </div>
+            <div id="lock-unlock" style="display: none;">
+                <input type="password" id="unlock-input" placeholder="Enter password to unlock"
+                    style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 8px;">
+                <button id="unlock-btn" style="width: 100%;">🔓 Unlock</button>
+            </div>
+            <button id="cancel-lock" style="margin-top: 16px;">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Locked Screen -->
+    <div id="locked-screen" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>🔒 Editor Locked</h3>
+            <p style="font-size: 12px; color: #666; margin-bottom: 12px;">Enter your password to access your documents
+            </p>
+            <input type="password" id="locked-password-input" placeholder="Enter password"
+                style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 8px;">
+            <button id="locked-unlock-btn" style="width: 100%;">🔓 Unlock Editor</button>
         </div>
     </div>
 
@@ -276,6 +450,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/xml/xml.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/css/css.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script src="editor.js"></script>
 </body>
 

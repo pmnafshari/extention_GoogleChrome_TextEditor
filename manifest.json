@@ -10,7 +10,8 @@
         "activeTab"
     ],
     "host_permissions": [
-        "https://drive.google.com/*"
+        "https://api.github.com/*",
+        "https://dpaste.com/*"
     ],
     "action": {
         "default_popup": "popup.html",
