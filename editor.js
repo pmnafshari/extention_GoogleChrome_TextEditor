@@ -74,13 +74,31 @@ function setupGlobalListeners() {
     addEnterKey('unlock-input', 'unlock-btn');
     addEnterKey('locked-password-input', 'locked-unlock-btn');
 
-    // Persistence Handlers
+    // Persistence Handlers - Save data when popup is about to close
     window.addEventListener('blur', () => {
-        saveToStorage();
+        if (isDataLoaded && !isLocked) {
+            updateActiveTabContent();
+            forceSaveToStorage();
+        }
     });
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-            saveToStorage();
+        if (document.visibilityState === 'hidden' && isDataLoaded && !isLocked) {
+            updateActiveTabContent();
+            forceSaveToStorage();
+        }
+    });
+    // Save before page unload (if possible)
+    window.addEventListener('beforeunload', () => {
+        if (isDataLoaded && !isLocked) {
+            updateActiveTabContent();
+            // Use synchronous storage for critical saves
+            const data = {
+                tabs: tabs,
+                activeTabId: activeTabId,
+                theme: currentTheme,
+                timestamp: new Date().toISOString()
+            };
+            chrome.storage.local.set({ editorData: data });
         }
     });
 }
@@ -350,9 +368,34 @@ function updateWordCount() {
 function autoSave() {
     clearTimeout(autoSaveTimeout);
     autoSaveTimeout = setTimeout(() => {
-        saveToStorage();
+        // Always update content first
+        updateActiveTabContent();
+        // Save immediately
+        if (!isLocked && isDataLoaded) {
+            saveToStorage();
+        } else if (isDataLoaded) {
+            // Even if locked, we should save (but this shouldn't happen in normal flow)
+            forceSaveToStorage();
+        }
         showSaveIndicator();
-    }, 1000);
+    }, 500); // Reduced timeout for faster saves
+}
+
+// Force save function - saves regardless of lock status (used when locking)
+function forceSaveToStorage() {
+    if (!isDataLoaded) return;
+    
+    updateActiveTabContent();
+    const data = {
+        tabs: tabs,
+        activeTabId: activeTabId,
+        theme: currentTheme,
+        timestamp: new Date().toISOString()
+    };
+
+    chrome.storage.local.set({ editorData: data }, () => {
+        console.log('Data saved successfully');
+    });
 }
 
 function saveToStorage() {
@@ -384,11 +427,23 @@ function loadSavedData() {
                 nextTabId = Math.max(...tabs.map(t => t.id)) + 1;
                 renderTabs();
                 switchTab(activeTabId);
+            } else {
+                // If no tabs in saved data, ensure we have at least one
+                if (tabs.length === 0) {
+                    tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
+                    renderTabs();
+                }
             }
 
             if (data.theme) {
                 currentTheme = data.theme;
                 document.body.className = `${currentTheme}-mode`;
+            }
+        } else {
+            // No saved data - ensure we have default tab
+            if (tabs.length === 0) {
+                tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
+                renderTabs();
             }
         }
     });
@@ -454,16 +509,27 @@ function restoreLastClosedTab() {
 }
 
 function switchTab(tabId) {
+    // Save current tab content before switching
     updateActiveTabContent();
+    // Save immediately when switching tabs
+    if (isDataLoaded && !isLocked) {
+        forceSaveToStorage();
+    }
+    
     activeTabId = tabId;
     const tab = tabs.find(t => t.id === tabId);
 
     if (!tab) return;
 
     const textEditor = document.getElementById('text-editor');
-    textEditor.value = tab.content;
+    textEditor.value = tab.content || '';
     textEditor.style.fontFamily = tab.font;
     document.getElementById('font-select').value = tab.font;
+
+    // Update CodeMirror if in code mode
+    if (isCodeMode && codeMirrorInstance) {
+        codeMirrorInstance.setValue(tab.content || '');
+    }
 
     if (tab.isCodeMode !== isCodeMode) {
         toggleEditorMode();
@@ -475,11 +541,27 @@ function switchTab(tabId) {
 
 function updateActiveTabContent() {
     const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab) return;
+    if (!tab) {
+        // If tab doesn't exist, create it
+        if (tabs.length === 0) {
+            tabs.push({ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false });
+            activeTabId = 0;
+        }
+        return;
+    }
 
-    const content = isCodeMode && codeMirrorInstance ? codeMirrorInstance.getValue() : document.getElementById('text-editor').value;
+    // Get content from editor (CodeMirror or textarea)
+    let content = '';
+    if (isCodeMode && codeMirrorInstance) {
+        content = codeMirrorInstance.getValue() || '';
+    } else {
+        const textEditor = document.getElementById('text-editor');
+        content = textEditor ? (textEditor.value || '') : '';
+    }
+    
     tab.content = content;
-    tab.font = document.getElementById('font-select').value;
+    const fontSelect = document.getElementById('font-select');
+    tab.font = fontSelect ? fontSelect.value : "'Segoe UI', Arial, sans-serif";
     tab.isCodeMode = isCodeMode;
 }
 
@@ -816,16 +898,15 @@ function unlockFromModal() {
 
     if (hash === passwordHash) {
         // Lock the editor - Save data BEFORE setting isLocked
-        updateActiveTabContent(); // Update content first
-        const data = {
-            tabs: tabs,
-            activeTabId: activeTabId,
-            theme: currentTheme,
-            timestamp: new Date().toISOString()
-        };
-        // Force save even when about to lock
-        chrome.storage.local.set({ editorData: data }, () => {
-            // Now set locked state
+        // Clear any pending autosave
+        clearTimeout(autoSaveTimeout);
+        // Update content immediately
+        updateActiveTabContent();
+        // Force save using the dedicated function
+        forceSaveToStorage();
+        
+        // Small delay to ensure save completes, then lock
+        setTimeout(() => {
             isLocked = true;
             chrome.storage.local.set({ isLocked: true }, () => {
                 document.getElementById('app-container').style.display = 'none';
@@ -833,7 +914,7 @@ function unlockFromModal() {
                 hideLockModal();
                 updateLockButton();
             });
-        });
+        }, 100);
     } else {
         alert('❌ Wrong password!');
     }
@@ -843,23 +924,22 @@ function unlockFromModal() {
 function tryLockEditor() {
     if (passwordHash) {
         // Direct Lock - Save data BEFORE setting isLocked
-        updateActiveTabContent(); // Update content first
-        const data = {
-            tabs: tabs,
-            activeTabId: activeTabId,
-            theme: currentTheme,
-            timestamp: new Date().toISOString()
-        };
-        // Force save even when about to lock
-        chrome.storage.local.set({ editorData: data }, () => {
-            // Now set locked state
+        // Clear any pending autosave
+        clearTimeout(autoSaveTimeout);
+        // Update content immediately
+        updateActiveTabContent();
+        // Force save using the dedicated function
+        forceSaveToStorage();
+        
+        // Small delay to ensure save completes, then lock
+        setTimeout(() => {
             isLocked = true;
             chrome.storage.local.set({ isLocked: true }, () => {
                 document.getElementById('app-container').style.display = 'none';
                 showLockedScreen();
                 updateLockButton();
             });
-        });
+        }, 100);
     } else {
         // Show Setup Helper
         showLockModal();
