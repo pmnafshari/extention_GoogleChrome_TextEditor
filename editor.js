@@ -7,16 +7,27 @@ let activeTabId = 0;
 let nextTabId = 1;
 let isLocked = false;
 let passwordHash = null;
+let isDataLoaded = false; // Guard against overwriting data before load
 
 // Initialize
+let tabHistory = [];
+
 document.addEventListener('DOMContentLoaded', async () => {
+    // Always setup global listeners first (lock screen, etc.)
+    setupGlobalListeners();
+
     await checkLockStatus();
+
     if (!isLocked) {
-        loadSavedData();
-        setupEventListeners();
-        updateWordCount();
+        initializeEditor();
     }
 });
+
+function initializeEditor() {
+    loadSavedData();
+    setupEditorListeners();
+    updateWordCount();
+}
 
 async function checkLockStatus() {
     return new Promise((resolve) => {
@@ -26,13 +37,59 @@ async function checkLockStatus() {
 
             if (isLocked && passwordHash) {
                 showLockedScreen();
+                // Ensure app container is hidden
+                document.getElementById('app-container').style.display = 'none';
+            } else {
+                // Unlock and show app container
+                document.getElementById('app-container').style.display = 'flex';
             }
             resolve();
         });
     });
 }
 
-function setupEventListeners() {
+function setupGlobalListeners() {
+    // Lock/Unlock Logic
+    document.getElementById('lock-btn').addEventListener('click', tryLockEditor);
+    document.getElementById('set-password-btn').addEventListener('click', setPassword);
+    document.getElementById('remove-password-btn').addEventListener('click', removePassword);
+    document.getElementById('unlock-btn').addEventListener('click', unlockFromModal);
+    document.getElementById('cancel-lock').addEventListener('click', hideLockModal);
+    document.getElementById('locked-unlock-btn').addEventListener('click', unlockFromLockedScreen);
+
+    // Enter Key Support for Password Inputs
+    const addEnterKey = (id, btnId) => {
+        const input = document.getElementById(id);
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById(btnId).click();
+                }
+            });
+        }
+    };
+
+    addEnterKey('password-confirm', 'set-password-btn');
+    addEnterKey('unlock-input', 'unlock-btn');
+    addEnterKey('locked-password-input', 'locked-unlock-btn');
+
+    // Persistence Handlers
+    window.addEventListener('blur', () => {
+        saveToStorage();
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            saveToStorage();
+        }
+    });
+}
+
+function setupEditorListeners() {
+    // Prevent duplicate listeners
+    if (document.body.dataset.listenersAttached) return;
+    document.body.dataset.listenersAttached = 'true';
+
     // Formatting buttons
     document.getElementById('bold-btn').addEventListener('click', () => formatText('bold'));
     document.getElementById('italic-btn').addEventListener('click', () => formatText('italic'));
@@ -67,14 +124,6 @@ function setupEventListeners() {
     document.getElementById('open-url').addEventListener('click', openCloudUrl);
     document.getElementById('cancel-cloud').addEventListener('click', hideCloudModal);
 
-    // Lock/Password
-    document.getElementById('lock-btn').addEventListener('click', showLockModal);
-    document.getElementById('set-password-btn').addEventListener('click', setPassword);
-    document.getElementById('remove-password-btn').addEventListener('click', removePassword);
-    document.getElementById('unlock-btn').addEventListener('click', unlockFromModal);
-    document.getElementById('cancel-lock').addEventListener('click', hideLockModal);
-    document.getElementById('locked-unlock-btn').addEventListener('click', unlockFromLockedScreen);
-
     // Tabs
     document.getElementById('new-tab-btn').addEventListener('click', createNewTab);
     document.addEventListener('click', (e) => {
@@ -94,8 +143,36 @@ function setupEventListeners() {
         autoSave();
     });
 
-    // Text editor keydown for auto-numbering
+    // Keydown handler (Undo, Shortcuts)
+    document.addEventListener('keydown', handleGlobalKeydown);
     document.getElementById('text-editor').addEventListener('keydown', handleEditorKeydown);
+}
+
+function handleGlobalKeydown(e) {
+    // Handle App Level Undo (Ctrl+Shift+Z or Ctrl+Z)
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        // Simple Ctrl+Z
+        // If we are NOT in an editor, or if editor is default textarea with no value?
+        // Actually, user requested Ctrl+Z to undo tab close.
+        // We will prioritize Tab Undo if the Focus is NOT in the Text Editor.
+        // OR: We try to be smart.
+        if (document.activeElement.id !== 'text-editor' && !document.activeElement.classList.contains('CodeMirror-textarea')) {
+            // Check History
+            if (tabHistory.length > 0) {
+                e.preventDefault();
+                restoreLastClosedTab();
+                return;
+            }
+        }
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z') {
+        // Explicit Ctrl+Shift+Z for Tab Restore
+        if (tabHistory.length > 0) {
+            e.preventDefault();
+            restoreLastClosedTab();
+        }
+    }
 }
 
 function formatText(command) {
@@ -141,6 +218,9 @@ function formatText(command) {
 function handleEditorKeydown(e) {
     // Handle keyboard shortcuts
     if (e.ctrlKey || e.metaKey) {
+        // If it is 'z', allow bubble to global unless handled?
+        // Note: CodeMirror handles its own events, this listener is for textarea.
+
         switch (e.key.toLowerCase()) {
             case 'b':
                 e.preventDefault();
@@ -159,6 +239,7 @@ function handleEditorKeydown(e) {
                 autoSave();
                 showSaveIndicator();
                 break;
+            // We do NOT intercept 'z' here, letting it bubble or browser handle text undo.
         }
         return;
     }
@@ -229,6 +310,10 @@ function toggleEditorMode() {
 
         codeMirrorInstance.getWrapperElement().style.display = 'block';
         textEditor.style.display = 'none';
+
+        // Focus CodeMirror
+        codeMirrorInstance.focus();
+
     } else {
         modeBtn.textContent = '📝';
         modeBtn.classList.remove('active');
@@ -241,6 +326,7 @@ function toggleEditorMode() {
             codeMirrorInstance.getWrapperElement().style.display = 'none';
             textEditor.style.display = 'block';
         }
+        textEditor.focus();
     }
 
     updateActiveTabContent();
@@ -270,6 +356,11 @@ function autoSave() {
 }
 
 function saveToStorage() {
+    // Critical: Do NOT save if we haven't loaded data yet (prevents overwriting with empty)
+    if (!isDataLoaded) return;
+    // Critical: Do not save if locked (prevents overwriting with hidden/empty state)
+    if (isLocked) return;
+
     updateActiveTabContent();
     const data = {
         tabs: tabs,
@@ -283,6 +374,7 @@ function saveToStorage() {
 
 function loadSavedData() {
     chrome.storage.local.get(['editorData'], (result) => {
+        isDataLoaded = true; // Allow saving from now on
         if (result.editorData) {
             const data = result.editorData;
 
@@ -324,6 +416,17 @@ function closeTab(tabId) {
     }
 
     const tabIndex = tabs.findIndex(t => t.id === tabId);
+    const tabToClose = tabs[tabIndex];
+
+    // Push to history for Undo
+    tabHistory.push({
+        tab: tabToClose,
+        index: tabIndex
+    });
+
+    // Limit history stack
+    if (tabHistory.length > 20) tabHistory.shift();
+
     tabs.splice(tabIndex, 1);
 
     if (activeTabId === tabId) {
@@ -332,6 +435,21 @@ function closeTab(tabId) {
     }
 
     renderTabs();
+    autoSave();
+}
+
+function restoreLastClosedTab() {
+    if (tabHistory.length === 0) return;
+
+    const lastClosed = tabHistory.pop();
+    const tab = lastClosed.tab;
+    const index = Math.min(lastClosed.index, tabs.length);
+
+    // Restore tab
+    tabs.splice(index, 0, tab);
+
+    renderTabs();
+    switchTab(tab.id);
     autoSave();
 }
 
@@ -615,15 +733,19 @@ function showLockModal() {
     document.getElementById('lock-modal').classList.add('show');
 
     if (passwordHash) {
-        document.getElementById('lock-modal-title').textContent = '🔒 Password Protection Active';
+        document.getElementById('lock-modal-title').textContent = '🔒 Lock Editor';
         document.getElementById('lock-setup').style.display = 'none';
         document.getElementById('lock-unlock').style.display = 'block';
         document.getElementById('remove-password-btn').style.display = 'block';
+
+        setTimeout(() => document.getElementById('unlock-input').focus(), 100);
     } else {
         document.getElementById('lock-modal-title').textContent = '🔒 Set Password Protection';
         document.getElementById('lock-setup').style.display = 'block';
         document.getElementById('lock-unlock').style.display = 'none';
         document.getElementById('remove-password-btn').style.display = 'none';
+
+        setTimeout(() => document.getElementById('password-input').focus(), 100);
     }
 }
 
@@ -693,15 +815,54 @@ function unlockFromModal() {
     const hash = CryptoJS.SHA256(password).toString();
 
     if (hash === passwordHash) {
-        // Lock the editor
-        isLocked = true;
-        chrome.storage.local.set({ isLocked: true }, () => {
-            alert('🔒 Editor locked! Close and reopen to see the lock screen.');
-            hideLockModal();
-            updateLockButton();
+        // Lock the editor - Save data BEFORE setting isLocked
+        updateActiveTabContent(); // Update content first
+        const data = {
+            tabs: tabs,
+            activeTabId: activeTabId,
+            theme: currentTheme,
+            timestamp: new Date().toISOString()
+        };
+        // Force save even when about to lock
+        chrome.storage.local.set({ editorData: data }, () => {
+            // Now set locked state
+            isLocked = true;
+            chrome.storage.local.set({ isLocked: true }, () => {
+                document.getElementById('app-container').style.display = 'none';
+                showLockedScreen();
+                hideLockModal();
+                updateLockButton();
+            });
         });
     } else {
         alert('❌ Wrong password!');
+    }
+}
+
+// New Direct Lock Function
+function tryLockEditor() {
+    if (passwordHash) {
+        // Direct Lock - Save data BEFORE setting isLocked
+        updateActiveTabContent(); // Update content first
+        const data = {
+            tabs: tabs,
+            activeTabId: activeTabId,
+            theme: currentTheme,
+            timestamp: new Date().toISOString()
+        };
+        // Force save even when about to lock
+        chrome.storage.local.set({ editorData: data }, () => {
+            // Now set locked state
+            isLocked = true;
+            chrome.storage.local.set({ isLocked: true }, () => {
+                document.getElementById('app-container').style.display = 'none';
+                showLockedScreen();
+                updateLockButton();
+            });
+        });
+    } else {
+        // Show Setup Helper
+        showLockModal();
     }
 }
 
@@ -718,11 +879,16 @@ function unlockFromLockedScreen() {
     if (hash === passwordHash) {
         isLocked = false;
         chrome.storage.local.set({ isLocked: false }, () => {
-            document.getElementById('locked-screen').style.display = 'none';
-            loadSavedData();
-            setupEventListeners();
-            updateWordCount();
-            updateLockButton();
+            // Animation Out
+            const lockScreen = document.getElementById('locked-screen');
+            lockScreen.classList.remove('visible');
+
+            setTimeout(() => {
+                lockScreen.style.display = 'none';
+                document.getElementById('app-container').style.display = 'flex';
+                initializeEditor(); // Use the new initialization function
+                updateLockButton();
+            }, 300); // 300ms match CSS transition
         });
     } else {
         alert('❌ Wrong password! Try again.');
@@ -731,7 +897,20 @@ function unlockFromLockedScreen() {
 }
 
 function showLockedScreen() {
-    document.getElementById('locked-screen').style.display = 'flex';
+    const lockScreen = document.getElementById('locked-screen');
+    lockScreen.style.display = 'flex';
+    // Force reflow
+    void lockScreen.offsetWidth;
+    lockScreen.classList.add('visible');
+
+    // Auto-focus the input
+    setTimeout(() => {
+        const input = document.getElementById('locked-password-input');
+        if (input) {
+            input.value = ''; // Clear previous attempt
+            input.focus();
+        }
+    }, 100);
 }
 
 function updateLockButton() {
