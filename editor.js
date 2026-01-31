@@ -431,29 +431,42 @@ function saveToStorage() {
 
 function loadSavedData() {
     chrome.storage.local.get(['editorData'], (result) => {
-        console.log('Loading saved data:', result);
+        console.log('Loading saved data...');
         isDataLoaded = true; // Allow saving from now on
         
         if (result.editorData) {
             const data = result.editorData;
-            console.log('Found saved data:', data);
+            console.log('Found saved data. Tabs count:', data.tabs ? data.tabs.length : 0);
 
             if (data.tabs && data.tabs.length > 0) {
-                // Restore tabs from saved data
+                // Restore tabs from saved data - CRITICAL: Replace tabs array completely
                 tabs = data.tabs.map(tab => ({
-                    ...tab,
-                    content: tab.content || '' // Ensure content is never undefined
+                    id: tab.id || 0,
+                    name: tab.name || 'Tab 1',
+                    content: tab.content || '', // Ensure content is never undefined
+                    font: tab.font || "'Segoe UI', Arial, sans-serif",
+                    isCodeMode: tab.isCodeMode || false
                 }));
-                activeTabId = data.activeTabId !== undefined ? data.activeTabId : tabs[0].id;
-                nextTabId = Math.max(...tabs.map(t => t.id), 0) + 1;
                 
-                console.log('Restored tabs:', tabs);
+                activeTabId = data.activeTabId !== undefined ? data.activeTabId : (tabs.length > 0 ? tabs[0].id : 0);
+                nextTabId = tabs.length > 0 ? Math.max(...tabs.map(t => t.id), 0) + 1 : 1;
+                
+                console.log('Restored tabs count:', tabs.length);
                 console.log('Active tab ID:', activeTabId);
+                if (tabs.length > 0) {
+                    const activeTab = tabs.find(t => t.id === activeTabId);
+                    console.log('Active tab content length:', activeTab ? (activeTab.content ? activeTab.content.length : 0) : 0);
+                    console.log('Active tab content preview:', activeTab && activeTab.content ? activeTab.content.substring(0, 100) : 'empty');
+                }
                 
                 renderTabs();
-                switchTab(activeTabId);
+                // Use setTimeout to ensure DOM is ready
+                setTimeout(() => {
+                    switchTab(activeTabId);
+                }, 50);
             } else {
                 // If no tabs in saved data, keep existing tabs or create default
+                console.log('No tabs in saved data');
                 if (tabs.length === 0) {
                     tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
                     renderTabs();
@@ -466,7 +479,7 @@ function loadSavedData() {
             }
         } else {
             // No saved data - keep existing tabs if any, otherwise create default
-            console.log('No saved data found, using default');
+            console.log('No saved data found');
             if (tabs.length === 0) {
                 tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
                 renderTabs();
@@ -545,20 +558,42 @@ function switchTab(tabId) {
     activeTabId = tabId;
     const tab = tabs.find(t => t.id === tabId);
 
-    if (!tab) return;
+    if (!tab) {
+        console.error('Tab not found:', tabId);
+        return;
+    }
 
+    console.log('Switching to tab:', tabId, 'Content length:', tab.content ? tab.content.length : 0);
+    
     const textEditor = document.getElementById('text-editor');
-    textEditor.value = tab.content || '';
-    textEditor.style.fontFamily = tab.font;
-    document.getElementById('font-select').value = tab.font;
+    if (textEditor) {
+        textEditor.value = tab.content || '';
+        textEditor.style.fontFamily = tab.font || "'Segoe UI', Arial, sans-serif";
+    }
+    
+    const fontSelect = document.getElementById('font-select');
+    if (fontSelect) {
+        fontSelect.value = tab.font || "'Segoe UI', Arial, sans-serif";
+    }
 
     // Update CodeMirror if in code mode
     if (isCodeMode && codeMirrorInstance) {
         codeMirrorInstance.setValue(tab.content || '');
     }
 
+    // Switch mode if needed
     if (tab.isCodeMode !== isCodeMode) {
-        toggleEditorMode();
+        // Temporarily set mode to match tab
+        const wasCodeMode = isCodeMode;
+        isCodeMode = tab.isCodeMode;
+        
+        if (tab.isCodeMode && !wasCodeMode) {
+            // Need to switch to code mode
+            toggleEditorMode();
+        } else if (!tab.isCodeMode && wasCodeMode) {
+            // Need to switch to text mode
+            toggleEditorMode();
+        }
     }
 
     renderTabs();
@@ -576,19 +611,29 @@ function updateActiveTabContent() {
         return;
     }
 
-    // Get content from editor (CodeMirror or textarea)
+    // Get content from editor (CodeMirror or textarea) - ALWAYS get fresh content
     let content = '';
-    if (isCodeMode && codeMirrorInstance) {
-        content = codeMirrorInstance.getValue() || '';
-    } else {
-        const textEditor = document.getElementById('text-editor');
-        content = textEditor ? (textEditor.value || '') : '';
+    try {
+        if (isCodeMode && codeMirrorInstance) {
+            content = codeMirrorInstance.getValue() || '';
+        } else {
+            const textEditor = document.getElementById('text-editor');
+            if (textEditor) {
+                content = textEditor.value || '';
+            }
+        }
+    } catch (e) {
+        console.error('Error reading editor content:', e);
+        content = tab.content || ''; // Fallback to existing content
     }
     
+    // Always update the tab content
     tab.content = content;
     const fontSelect = document.getElementById('font-select');
     tab.font = fontSelect ? fontSelect.value : "'Segoe UI', Arial, sans-serif";
     tab.isCodeMode = isCodeMode;
+    
+    console.log('Updated tab content:', { tabId: activeTabId, contentLength: content.length, content: content.substring(0, 50) });
 }
 
 function renderTabs() {
@@ -926,20 +971,45 @@ function unlockFromModal() {
         // Lock the editor - Save data BEFORE setting isLocked
         // Clear any pending autosave
         clearTimeout(autoSaveTimeout);
-        // Update content immediately - get current content from editor
-        updateActiveTabContent();
         
-        // Prepare data to save
-        const data = {
-            tabs: tabs,
+        // CRITICAL: Get content directly from editor before updating tab
+        let currentContent = '';
+        try {
+            if (isCodeMode && codeMirrorInstance) {
+                currentContent = codeMirrorInstance.getValue() || '';
+            } else {
+                const textEditor = document.getElementById('text-editor');
+                if (textEditor) {
+                    currentContent = textEditor.value || '';
+                }
+            }
+        } catch (e) {
+            console.error('Error reading content before lock:', e);
+        }
+        
+        // Update tab with current content
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (tab) {
+            tab.content = currentContent;
+        }
+        
+        // Prepare data to save - make a deep copy
+        const dataToSave = {
+            tabs: tabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                content: t.content || '',
+                font: t.font || "'Segoe UI', Arial, sans-serif",
+                isCodeMode: t.isCodeMode || false
+            })),
             activeTabId: activeTabId,
             theme: currentTheme,
             timestamp: new Date().toISOString()
         };
         
         // Save immediately with callback to ensure it completes
-        chrome.storage.local.set({ editorData: data }, () => {
-            console.log('Data saved before locking:', data);
+        chrome.storage.local.set({ editorData: dataToSave }, () => {
+            console.log('Data saved before locking from modal');
             // Now set locked state after save completes
             isLocked = true;
             chrome.storage.local.set({ isLocked: true }, () => {
@@ -960,20 +1030,60 @@ function tryLockEditor() {
         // Direct Lock - Save data BEFORE setting isLocked
         // Clear any pending autosave
         clearTimeout(autoSaveTimeout);
-        // Update content immediately - get current content from editor
-        updateActiveTabContent();
         
-        // Prepare data to save
-        const data = {
-            tabs: tabs,
+        // CRITICAL: Get content directly from editor before updating tab
+        let currentContent = '';
+        try {
+            if (isCodeMode && codeMirrorInstance) {
+                currentContent = codeMirrorInstance.getValue() || '';
+            } else {
+                const textEditor = document.getElementById('text-editor');
+                if (textEditor) {
+                    currentContent = textEditor.value || '';
+                }
+            }
+        } catch (e) {
+            console.error('Error reading content before lock:', e);
+        }
+        
+        // Update tab with current content
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (tab) {
+            tab.content = currentContent;
+            console.log('Locking - Current content length:', currentContent.length);
+            console.log('Locking - Current content preview:', currentContent.substring(0, 100));
+        }
+        
+        // Prepare data to save - make a deep copy to ensure we save current state
+        const dataToSave = {
+            tabs: tabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                content: t.content || '',
+                font: t.font || "'Segoe UI', Arial, sans-serif",
+                isCodeMode: t.isCodeMode || false
+            })),
             activeTabId: activeTabId,
             theme: currentTheme,
             timestamp: new Date().toISOString()
         };
         
+        console.log('Saving data before lock:', JSON.stringify(dataToSave).substring(0, 200));
+        
         // Save immediately with callback to ensure it completes
-        chrome.storage.local.set({ editorData: data }, () => {
-            console.log('Data saved before locking:', data);
+        chrome.storage.local.set({ editorData: dataToSave }, () => {
+            console.log('Data saved successfully before locking');
+            // Verify save
+            chrome.storage.local.get(['editorData'], (result) => {
+                console.log('Verified saved data:', result.editorData ? 'Data exists' : 'No data');
+                if (result.editorData && result.editorData.tabs) {
+                    console.log('Saved tabs count:', result.editorData.tabs.length);
+                    if (result.editorData.tabs.length > 0) {
+                        console.log('First tab content length:', result.editorData.tabs[0].content ? result.editorData.tabs[0].content.length : 0);
+                    }
+                }
+            });
+            
             // Now set locked state after save completes
             isLocked = true;
             chrome.storage.local.set({ isLocked: true }, () => {
