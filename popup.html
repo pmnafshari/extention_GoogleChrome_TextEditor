@@ -5,9 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CloudWrite Editor</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/default.min.css">
+    <link rel="stylesheet" href="lib/codemirror.min.css">
+    <link rel="stylesheet" href="lib/monokai.min.css">
+    <link rel="stylesheet" href="lib/default.min.css">
     <style>
         * {
             margin: 0;
@@ -15,11 +15,20 @@
             box-sizing: border-box;
         }
 
+        html,
         body {
             width: 640px;
             height: 600px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
+        }
+
+        /* Flexbox Layout Structure */
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            width: 100%;
         }
 
         body.light-mode {
@@ -39,6 +48,8 @@
             border-bottom: 1px solid #ddd;
             flex-wrap: wrap;
             align-items: center;
+            flex-shrink: 0;
+            /* Prevent shrinking */
         }
 
         body.dark-mode .toolbar {
@@ -102,6 +113,8 @@
             border-bottom: 1px solid #ccc;
             overflow-x: auto;
             padding: 4px 4px 0 4px;
+            flex-shrink: 0;
+            /* Prevent shrinking */
         }
 
         body.dark-mode .tabs-container {
@@ -175,9 +188,13 @@
         }
 
         #editor-container {
-            height: calc(100% - 155px);
-            overflow: auto;
+            flex: 1;
+            /* Take up all remaining space */
+            overflow: hidden;
+            /* Prevent container scroll, let items scroll */
             padding: 20px;
+            display: flex;
+            flex-direction: column;
         }
 
         #text-editor {
@@ -191,6 +208,8 @@
             background: transparent;
             color: inherit;
             resize: none;
+            overflow: auto;
+            /* Allow scroll inside textarea */
         }
 
         #text-editor.code-mode {
@@ -209,7 +228,8 @@
         }
 
         .CodeMirror {
-            height: 100%;
+            height: 100% !important;
+            /* Force CodeMirror to take full height */
             font-size: 13px;
             font-family: 'Ubuntu Mono', 'Consolas', 'Monaco', monospace !important;
         }
@@ -224,12 +244,16 @@
         }
 
         .status-bar {
-            padding: 6px 12px;
+            padding: 4px 12px;
+            /* Reduced padding */
             border-top: 1px solid #ddd;
             font-size: 11px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-shrink: 0;
+            /* Prevent shrinking */
+            min-height: 24px;
         }
 
         body.dark-mode .status-bar {
@@ -253,11 +277,23 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.5);
+            /* Make opaque background */
+            background: #f5f5f5;
             justify-content: center;
             align-items: center;
             z-index: 1000;
         }
+
+        body.dark-mode .modal {
+            /* Make opaque background dark */
+            background: #1e1e1e;
+        }
+
+        /* Special case for Download/Cloud Modals if user wants them semi-transparent? 
+           User specifically asked about LOCK, but consistent UI is better. 
+           If the user says "Still visible", they mean BEHIND the modal. 
+           An opaque modal prevents this. 
+        */
 
         .modal.show {
             display: flex;
@@ -269,10 +305,13 @@
             border-radius: 8px;
             max-width: 400px;
             width: 90%;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            /* Add shadow for depth on opaque bg */
         }
 
         body.dark-mode .modal-content {
             background: #2d2d2d;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
         }
 
         body.dark-mode #github-setup {
@@ -300,64 +339,91 @@
             gap: 8px;
             margin-top: 12px;
         }
+
+        /* Locked Screen specific styles */
+        #locked-screen {
+            z-index: 9999;
+            /* Ensure it is opaque and consistent */
+            background-color: #f5f5f5 !important;
+            /* Animation state */
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
+            /* Prevent clicks when hidden/fading out */
+        }
+
+        #locked-screen.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        body.dark-mode #locked-screen {
+            background-color: #1e1e1e !important;
+        }
+
+        #locked-screen .modal-content {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
     </style>
 </head>
 
 <body class="light-mode">
-    <div class="toolbar">
-        <div class="toolbar-group">
-            <button id="bold-btn" title="Bold (Ctrl+B)"><strong>B</strong></button>
-            <button id="italic-btn" title="Italic (Ctrl+I)"><em>I</em></button>
-            <button id="underline-btn" title="Underline (Ctrl+U)"><u>U</u></button>
+    <div id="app-container" style="display: none;">
+        <div class="toolbar">
+            <div class="toolbar-group">
+                <button id="bold-btn" title="Bold (Ctrl+B)"><strong>B</strong></button>
+                <button id="italic-btn" title="Italic (Ctrl+I)"><em>I</em></button>
+                <button id="underline-btn" title="Underline (Ctrl+U)"><u>U</u></button>
+            </div>
+
+            <div class="toolbar-group">
+                <button id="bullet-btn" title="Bullet List">• List</button>
+                <button id="number-btn" title="Numbered List">Numbers</button>
+            </div>
+
+            <div class="toolbar-group">
+                <select id="font-select">
+                    <option value="'Segoe UI', Arial, sans-serif">Segoe UI</option>
+                    <option value="'Roboto', sans-serif">Roboto</option>
+                    <option value="'Playfair Display', serif">Playfair</option>
+                    <option value="'Montserrat', sans-serif">Montserrat</option>
+                    <option value="'Poppins', sans-serif">Poppins</option>
+                    <option value="'Courier New', monospace">Courier</option>
+                    <option value="'Georgia', serif">Georgia</option>
+                </select>
+            </div>
+
+            <div class="toolbar-group">
+                <button id="theme-toggle" title="Toggle Theme">🌓</button>
+            </div>
+
+            <div class="toolbar-group">
+                <button id="mode-toggle" title="Switch Editor Mode">📝</button>
+            </div>
+
+            <div class="toolbar-group">
+                <button id="download-btn" title="Download">💾</button>
+                <button id="cloud-btn" title="Save to Cloud">☁️</button>
+                <button id="lock-btn" title="Lock/Unlock">🔒</button>
+            </div>
         </div>
 
-        <div class="toolbar-group">
-            <button id="bullet-btn" title="Bullet List">• List</button>
-            <button id="number-btn" title="Numbered List">Numbers</button>
+        <div class="tabs-container">
+            <div class="tab active" data-tab-id="0">
+                <span class="tab-name">Tab 1</span>
+                <span class="tab-close">×</span>
+            </div>
+            <button class="new-tab-btn" id="new-tab-btn">+ New Tab</button>
         </div>
 
-        <div class="toolbar-group">
-            <select id="font-select">
-                <option value="'Segoe UI', Arial, sans-serif">Segoe UI</option>
-                <option value="'Roboto', sans-serif">Roboto</option>
-                <option value="'Playfair Display', serif">Playfair</option>
-                <option value="'Montserrat', sans-serif">Montserrat</option>
-                <option value="'Poppins', sans-serif">Poppins</option>
-                <option value="'Courier New', monospace">Courier</option>
-                <option value="'Georgia', serif">Georgia</option>
-            </select>
+        <div id="editor-container">
+            <textarea id="text-editor" placeholder="Start writing..."></textarea>
         </div>
 
-        <div class="toolbar-group">
-            <button id="theme-toggle" title="Toggle Theme">🌓</button>
+        <div class="status-bar">
+            <span id="word-count">Words: 0 | Characters: 0</span>
+            <span class="save-indicator" id="save-indicator">✓ Saved</span>
         </div>
-
-        <div class="toolbar-group">
-            <button id="mode-toggle" title="Switch Editor Mode">📝</button>
-        </div>
-
-        <div class="toolbar-group">
-            <button id="download-btn" title="Download">💾</button>
-            <button id="cloud-btn" title="Save to Cloud">☁️</button>
-            <button id="lock-btn" title="Lock/Unlock">🔒</button>
-        </div>
-    </div>
-
-    <div class="tabs-container">
-        <div class="tab active" data-tab-id="0">
-            <span class="tab-name">Tab 1</span>
-            <span class="tab-close">×</span>
-        </div>
-        <button class="new-tab-btn" id="new-tab-btn">+ New Tab</button>
-    </div>
-
-    <div id="editor-container">
-        <textarea id="text-editor" placeholder="Start writing..."></textarea>
-    </div>
-
-    <div class="status-bar">
-        <span id="word-count">Words: 0 | Characters: 0</span>
-        <span class="save-indicator" id="save-indicator">✓ Saved</span>
     </div>
 
     <!-- Download Modal -->
@@ -424,9 +490,9 @@
                     Password</button>
             </div>
             <div id="lock-unlock" style="display: none;">
-                <input type="password" id="unlock-input" placeholder="Enter password to unlock"
+                <input type="password" id="unlock-input" placeholder="Verify password to lock"
                     style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 8px;">
-                <button id="unlock-btn" style="width: 100%;">🔓 Unlock</button>
+                <button id="unlock-btn" style="width: 100%;">� Lock Editor</button>
             </div>
             <button id="cancel-lock" style="margin-top: 16px;">Cancel</button>
         </div>
@@ -444,13 +510,13 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/xml/xml.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/css/css.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="lib/codemirror.min.js"></script>
+    <script src="lib/javascript.min.js"></script>
+    <script src="lib/python.min.js"></script>
+    <script src="lib/xml.min.js"></script>
+    <script src="lib/css.min.js"></script>
+    <script src="lib/jspdf.umd.min.js"></script>
+    <script src="lib/crypto-js.min.js"></script>
     <script src="editor.js"></script>
 </body>
 
