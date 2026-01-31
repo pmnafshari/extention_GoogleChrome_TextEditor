@@ -76,20 +76,32 @@ function setupGlobalListeners() {
 
     // Persistence Handlers - Save data when popup is about to close
     window.addEventListener('blur', () => {
-        if (isDataLoaded && !isLocked) {
+        if (!isLocked) {
             updateActiveTabContent();
-            forceSaveToStorage();
+            const data = {
+                tabs: tabs,
+                activeTabId: activeTabId,
+                theme: currentTheme,
+                timestamp: new Date().toISOString()
+            };
+            chrome.storage.local.set({ editorData: data });
         }
     });
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden' && isDataLoaded && !isLocked) {
+        if (document.visibilityState === 'hidden' && !isLocked) {
             updateActiveTabContent();
-            forceSaveToStorage();
+            const data = {
+                tabs: tabs,
+                activeTabId: activeTabId,
+                theme: currentTheme,
+                timestamp: new Date().toISOString()
+            };
+            chrome.storage.local.set({ editorData: data });
         }
     });
     // Save before page unload (if possible)
     window.addEventListener('beforeunload', () => {
-        if (isDataLoaded && !isLocked) {
+        if (!isLocked) {
             updateActiveTabContent();
             // Use synchronous storage for critical saves
             const data = {
@@ -383,9 +395,9 @@ function autoSave() {
 
 // Force save function - saves regardless of lock status (used when locking)
 function forceSaveToStorage() {
-    if (!isDataLoaded) return;
-    
+    // Always update content first, even if not loaded yet
     updateActiveTabContent();
+    
     const data = {
         tabs: tabs,
         activeTabId: activeTabId,
@@ -393,8 +405,10 @@ function forceSaveToStorage() {
         timestamp: new Date().toISOString()
     };
 
+    // Save immediately - don't wait for isDataLoaded when locking
     chrome.storage.local.set({ editorData: data }, () => {
-        console.log('Data saved successfully');
+        console.log('Data saved successfully', data);
+        isDataLoaded = true; // Mark as loaded after successful save
     });
 }
 
@@ -417,18 +431,29 @@ function saveToStorage() {
 
 function loadSavedData() {
     chrome.storage.local.get(['editorData'], (result) => {
+        console.log('Loading saved data:', result);
         isDataLoaded = true; // Allow saving from now on
+        
         if (result.editorData) {
             const data = result.editorData;
+            console.log('Found saved data:', data);
 
             if (data.tabs && data.tabs.length > 0) {
-                tabs = data.tabs;
-                activeTabId = data.activeTabId || 0;
-                nextTabId = Math.max(...tabs.map(t => t.id)) + 1;
+                // Restore tabs from saved data
+                tabs = data.tabs.map(tab => ({
+                    ...tab,
+                    content: tab.content || '' // Ensure content is never undefined
+                }));
+                activeTabId = data.activeTabId !== undefined ? data.activeTabId : tabs[0].id;
+                nextTabId = Math.max(...tabs.map(t => t.id), 0) + 1;
+                
+                console.log('Restored tabs:', tabs);
+                console.log('Active tab ID:', activeTabId);
+                
                 renderTabs();
                 switchTab(activeTabId);
             } else {
-                // If no tabs in saved data, ensure we have at least one
+                // If no tabs in saved data, keep existing tabs or create default
                 if (tabs.length === 0) {
                     tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
                     renderTabs();
@@ -440,7 +465,8 @@ function loadSavedData() {
                 document.body.className = `${currentTheme}-mode`;
             }
         } else {
-            // No saved data - ensure we have default tab
+            // No saved data - keep existing tabs if any, otherwise create default
+            console.log('No saved data found, using default');
             if (tabs.length === 0) {
                 tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
                 renderTabs();
@@ -900,13 +926,21 @@ function unlockFromModal() {
         // Lock the editor - Save data BEFORE setting isLocked
         // Clear any pending autosave
         clearTimeout(autoSaveTimeout);
-        // Update content immediately
+        // Update content immediately - get current content from editor
         updateActiveTabContent();
-        // Force save using the dedicated function
-        forceSaveToStorage();
         
-        // Small delay to ensure save completes, then lock
-        setTimeout(() => {
+        // Prepare data to save
+        const data = {
+            tabs: tabs,
+            activeTabId: activeTabId,
+            theme: currentTheme,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Save immediately with callback to ensure it completes
+        chrome.storage.local.set({ editorData: data }, () => {
+            console.log('Data saved before locking:', data);
+            // Now set locked state after save completes
             isLocked = true;
             chrome.storage.local.set({ isLocked: true }, () => {
                 document.getElementById('app-container').style.display = 'none';
@@ -914,7 +948,7 @@ function unlockFromModal() {
                 hideLockModal();
                 updateLockButton();
             });
-        }, 100);
+        });
     } else {
         alert('❌ Wrong password!');
     }
@@ -926,20 +960,28 @@ function tryLockEditor() {
         // Direct Lock - Save data BEFORE setting isLocked
         // Clear any pending autosave
         clearTimeout(autoSaveTimeout);
-        // Update content immediately
+        // Update content immediately - get current content from editor
         updateActiveTabContent();
-        // Force save using the dedicated function
-        forceSaveToStorage();
         
-        // Small delay to ensure save completes, then lock
-        setTimeout(() => {
+        // Prepare data to save
+        const data = {
+            tabs: tabs,
+            activeTabId: activeTabId,
+            theme: currentTheme,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Save immediately with callback to ensure it completes
+        chrome.storage.local.set({ editorData: data }, () => {
+            console.log('Data saved before locking:', data);
+            // Now set locked state after save completes
             isLocked = true;
             chrome.storage.local.set({ isLocked: true }, () => {
                 document.getElementById('app-container').style.display = 'none';
                 showLockedScreen();
                 updateLockButton();
             });
-        }, 100);
+        });
     } else {
         // Show Setup Helper
         showLockModal();
@@ -966,7 +1008,9 @@ function unlockFromLockedScreen() {
             setTimeout(() => {
                 lockScreen.style.display = 'none';
                 document.getElementById('app-container').style.display = 'flex';
-                initializeEditor(); // Use the new initialization function
+                // Reset isDataLoaded to false before loading to ensure fresh load
+                isDataLoaded = false;
+                initializeEditor(); // This will load saved data
                 updateLockButton();
             }, 300); // 300ms match CSS transition
         });
