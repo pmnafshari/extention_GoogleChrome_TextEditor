@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "CloudWrite - Advanced Text Editor",
+    "name": "Advanced Text Editor",
     "version": "1.0.0",
-    "description": "A powerful text and code editor with cloud storage integration",
+    "description": "A powerful text and code editor with cloud storage integration and advanced features",
     "permissions": [
         "storage",
         "downloads",

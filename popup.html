@@ -209,22 +209,46 @@
             color: inherit;
             resize: none;
             overflow: auto;
-            /* Allow scroll inside textarea */
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            /* Allow scroll inside contenteditable */
+        }
+        
+        #text-editor[contenteditable="true"]:empty:before {
+            content: attr(placeholder);
+            color: #999;
+            pointer-events: none;
+        }
+
+        #text-editor-textarea {
+            width: 100%;
+            height: 100%;
+            border: none;
+            outline: none;
+            font-family: 'Ubuntu Mono', 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            background: transparent;
+            resize: none;
         }
 
         #text-editor.code-mode {
             font-family: 'Ubuntu Mono', 'Consolas', 'Monaco', monospace;
-            background: #300a24;
-            color: #ffffff;
             padding: 12px;
             border-radius: 4px;
             line-height: 1.4;
             font-size: 13px;
         }
 
+        /* Light theme: dark color palette for code mode */
         body.light-mode #text-editor.code-mode {
-            background: #300a24;
-            color: #ffffff;
+            background: #272822;
+            color: #f8f8f2;
+        }
+
+        /* Dark theme: light color palette for code mode */
+        body.dark-mode #text-editor.code-mode {
+            background: #f8f8f2;
+            color: #272822;
         }
 
         .CodeMirror {
@@ -234,8 +258,41 @@
             font-family: 'Ubuntu Mono', 'Consolas', 'Monaco', monospace !important;
         }
 
-        .CodeMirror.cm-s-monokai {
-            background: #300a24 !important;
+        .CodeMirror-wrap {
+            height: 100% !important;
+        }
+
+        /* Light theme: use dark monokai theme */
+        body.light-mode .CodeMirror.cm-s-monokai {
+            background: #272822 !important;
+            color: #f8f8f2 !important;
+        }
+
+        /* Dark theme: use light default theme */
+        body.dark-mode .CodeMirror {
+            background: #f8f8f2 !important;
+            color: #272822 !important;
+        }
+
+        body.dark-mode .CodeMirror .CodeMirror-gutters {
+            background: #f0f0f0 !important;
+            border-right: 1px solid #ddd !important;
+        }
+
+        body.dark-mode .CodeMirror .CodeMirror-linenumber {
+            color: #666 !important;
+        }
+
+        body.dark-mode .CodeMirror .CodeMirror-cursor {
+            border-left: 1px solid #272822 !important;
+        }
+
+        body.dark-mode .CodeMirror .CodeMirror-line {
+            color: #272822 !important;
+        }
+
+        body.dark-mode .CodeMirror .CodeMirror-line span {
+            color: #272822 !important;
         }
 
         #font-select {
@@ -417,7 +474,8 @@
         </div>
 
         <div id="editor-container">
-            <textarea id="text-editor" placeholder="Start writing..."></textarea>
+            <div id="text-editor" contenteditable="true" placeholder="Start writing..."></div>
+            <textarea id="text-editor-textarea" style="display: none;"></textarea>
         </div>
 
         <div class="status-bar">

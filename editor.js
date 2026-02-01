@@ -74,24 +74,44 @@ function setupGlobalListeners() {
     addEnterKey('unlock-input', 'unlock-btn');
     addEnterKey('locked-password-input', 'locked-unlock-btn');
 
-    // Persistence Handlers - Save data when popup is about to close
+    // Persistence Handlers - ALWAYS save data when popup is about to close
     window.addEventListener('blur', () => {
-        if (!isLocked) {
-            updateActiveTabContent();
-            const data = {
-                tabs: tabs,
-                activeTabId: activeTabId,
-                theme: currentTheme,
-                timestamp: new Date().toISOString()
-            };
-            chrome.storage.local.set({ editorData: data });
+        // Always save, even if locked (content might have changed before lock)
+        const currentContent = getCurrentEditorContent();
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (tab) {
+            tab.content = currentContent;
         }
+        const data = {
+            tabs: tabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                content: t.id === activeTabId ? currentContent : (t.content || ''),
+                font: t.font || "'Segoe UI', Arial, sans-serif",
+                isCodeMode: t.isCodeMode || false
+            })),
+            activeTabId: activeTabId,
+            theme: currentTheme,
+            timestamp: new Date().toISOString()
+        };
+        chrome.storage.local.set({ editorData: data });
     });
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden' && !isLocked) {
-            updateActiveTabContent();
+        if (document.visibilityState === 'hidden') {
+            // Always save when hiding
+            const currentContent = getCurrentEditorContent();
+            const tab = tabs.find(t => t.id === activeTabId);
+            if (tab) {
+                tab.content = currentContent;
+            }
             const data = {
-                tabs: tabs,
+                tabs: tabs.map(t => ({
+                    id: t.id,
+                    name: t.name,
+                    content: t.id === activeTabId ? currentContent : (t.content || ''),
+                    font: t.font || "'Segoe UI', Arial, sans-serif",
+                    isCodeMode: t.isCodeMode || false
+                })),
                 activeTabId: activeTabId,
                 theme: currentTheme,
                 timestamp: new Date().toISOString()
@@ -101,17 +121,25 @@ function setupGlobalListeners() {
     });
     // Save before page unload (if possible)
     window.addEventListener('beforeunload', () => {
-        if (!isLocked) {
-            updateActiveTabContent();
-            // Use synchronous storage for critical saves
-            const data = {
-                tabs: tabs,
-                activeTabId: activeTabId,
-                theme: currentTheme,
-                timestamp: new Date().toISOString()
-            };
-            chrome.storage.local.set({ editorData: data });
+        // Always save on unload
+        const currentContent = getCurrentEditorContent();
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (tab) {
+            tab.content = currentContent;
         }
+        const data = {
+            tabs: tabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                content: t.id === activeTabId ? currentContent : (t.content || ''),
+                font: t.font || "'Segoe UI', Arial, sans-serif",
+                isCodeMode: t.isCodeMode || false
+            })),
+            activeTabId: activeTabId,
+            theme: currentTheme,
+            timestamp: new Date().toISOString()
+        };
+        chrome.storage.local.set({ editorData: data });
     });
 }
 
@@ -206,43 +234,179 @@ function handleGlobalKeydown(e) {
 }
 
 function formatText(command) {
-    const editor = document.getElementById('text-editor');
-    const start = editor.selectionStart;
-    const end = editor.selectionEnd;
-    const selectedText = editor.value.substring(start, end);
-
-    let formattedText = selectedText;
-    const before = editor.value.substring(0, start);
-    const after = editor.value.substring(end);
-
-    // Handle list formatting
-    if (command === 'bullet' || command === 'number') {
-        const lines = selectedText ? selectedText.split('\n') : [''];
-        if (command === 'bullet') {
-            formattedText = lines.map(line => line.trim() ? `• ${line.trim()}` : line).join('\n');
-        } else if (command === 'number') {
-            formattedText = lines.map((line, i) => line.trim() ? `${i + 1}. ${line.trim()}` : line).join('\n');
+    // Check if we're in code mode with CodeMirror
+    if (isCodeMode && codeMirrorInstance) {
+        // Handle CodeMirror formatting - use markdown syntax
+        const selection = codeMirrorInstance.getSelection();
+        const cursor = codeMirrorInstance.getCursor();
+        
+        if (command === 'bullet' || command === 'number') {
+            const lines = selection ? selection.split('\n') : [''];
+            let formattedText = '';
+            if (command === 'bullet') {
+                formattedText = lines.map(line => line.trim() ? `• ${line.trim()}` : line).join('\n');
+            } else if (command === 'number') {
+                formattedText = lines.map((line, i) => line.trim() ? `${i + 1}. ${line.trim()}` : line).join('\n');
+            }
+            codeMirrorInstance.replaceSelection(formattedText);
+        } else {
+            if (selection) {
+                let formattedText = '';
+                switch (command) {
+                    case 'bold':
+                        formattedText = `**${selection}**`;
+                        break;
+                    case 'italic':
+                        formattedText = `*${selection}*`;
+                        break;
+                    case 'underline':
+                        formattedText = `__${selection}__`;
+                        break;
+                }
+                codeMirrorInstance.replaceSelection(formattedText);
+            } else {
+                let markers = '';
+                switch (command) {
+                    case 'bold':
+                        markers = '****';
+                        break;
+                    case 'italic':
+                        markers = '**';
+                        break;
+                    case 'underline':
+                        markers = '____';
+                        break;
+                }
+                codeMirrorInstance.replaceSelection(markers);
+                if (markers.length === 4) {
+                    codeMirrorInstance.setCursor({ line: cursor.line, ch: cursor.ch + 2 });
+                } else if (markers.length === 2) {
+                    codeMirrorInstance.setCursor({ line: cursor.line, ch: cursor.ch + 1 });
+                }
+            }
         }
-    } else if (selectedText) {
-        // Simple markdown-style formatting
-        switch (command) {
-            case 'bold':
-                formattedText = `**${selectedText}**`;
-                break;
-            case 'italic':
-                formattedText = `*${selectedText}*`;
-                break;
-            case 'underline':
-                formattedText = `__${selectedText}__`;
-                break;
-        }
+        codeMirrorInstance.focus();
+        autoSave();
+        return;
     }
+    
+    // Handle contenteditable editor formatting using execCommand
+    const editor = document.getElementById('text-editor');
+    if (!editor) return;
+    
+    // Check if editor is contenteditable (new version) or textarea (old version)
+    const isContentEditable = editor.contentEditable === 'true' || editor.hasAttribute('contenteditable');
+    
+    if (isContentEditable) {
+        // Use execCommand for actual formatting
+        editor.focus();
+        
+        // Handle list formatting manually
+        if (command === 'bullet' || command === 'number') {
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const selectedText = range.toString();
+                const lines = selectedText ? selectedText.split('\n') : [''];
+                
+                let formattedText = '';
+                if (command === 'bullet') {
+                    formattedText = lines.map(line => line.trim() ? `• ${line.trim()}` : line).join('\n');
+                } else if (command === 'number') {
+                    formattedText = lines.map((line, i) => line.trim() ? `${i + 1}. ${line.trim()}` : line).join('\n');
+                }
+                
+                range.deleteContents();
+                range.insertNode(document.createTextNode(formattedText));
+            }
+        } else {
+            // Use execCommand for text formatting (bold, italic, underline)
+            let execCommandName = '';
+            switch (command) {
+                case 'bold':
+                    execCommandName = 'bold';
+                    break;
+                case 'italic':
+                    execCommandName = 'italic';
+                    break;
+                case 'underline':
+                    execCommandName = 'underline';
+                    break;
+            }
+            
+            if (execCommandName) {
+                document.execCommand(execCommandName, false, null);
+            }
+        }
+        
+        editor.focus();
+        autoSave();
+    } else {
+        // Fallback for textarea - use markdown syntax
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        const selectedText = editor.value.substring(start, end);
+        const before = editor.value.substring(0, start);
+        const after = editor.value.substring(end);
 
-    editor.value = before + formattedText + after;
-    editor.selectionStart = start;
-    editor.selectionEnd = start + formattedText.length;
-    editor.focus();
-    autoSave();
+        let formattedText = selectedText;
+        
+        if (command === 'bullet' || command === 'number') {
+            const lines = selectedText ? selectedText.split('\n') : [''];
+            if (command === 'bullet') {
+                formattedText = lines.map(line => line.trim() ? `• ${line.trim()}` : line).join('\n');
+            } else if (command === 'number') {
+                formattedText = lines.map((line, i) => line.trim() ? `${i + 1}. ${line.trim()}` : line).join('\n');
+            }
+        } else {
+            if (selectedText) {
+                switch (command) {
+                    case 'bold':
+                        formattedText = `**${selectedText}**`;
+                        break;
+                    case 'italic':
+                        formattedText = `*${selectedText}*`;
+                        break;
+                    case 'underline':
+                        formattedText = `__${selectedText}__`;
+                        break;
+                }
+            } else {
+                switch (command) {
+                    case 'bold':
+                        formattedText = '****';
+                        break;
+                    case 'italic':
+                        formattedText = '**';
+                        break;
+                    case 'underline':
+                        formattedText = '____';
+                        break;
+                }
+            }
+        }
+
+        editor.value = before + formattedText + after;
+        
+        if (selectedText) {
+            editor.selectionStart = start;
+            editor.selectionEnd = start + formattedText.length;
+        } else {
+            if (command === 'bold' || command === 'underline') {
+                editor.selectionStart = start + 2;
+                editor.selectionEnd = start + 2;
+            } else if (command === 'italic') {
+                editor.selectionStart = start + 1;
+                editor.selectionEnd = start + 1;
+            } else {
+                editor.selectionStart = start + formattedText.length;
+                editor.selectionEnd = start + formattedText.length;
+            }
+        }
+        
+        editor.focus();
+        autoSave();
+    }
 }
 
 function handleEditorKeydown(e) {
@@ -299,7 +463,18 @@ function toggleTheme() {
     document.body.className = `${currentTheme}-mode`;
 
     if (codeMirrorInstance) {
-        codeMirrorInstance.setOption('theme', currentTheme === 'dark' ? 'monokai' : 'default');
+        // Light theme uses dark monokai, dark theme uses light default
+        const codeTheme = currentTheme === 'light' ? 'monokai' : 'default';
+        codeMirrorInstance.setOption('theme', codeTheme);
+        
+        // Update background and text colors
+        if (currentTheme === 'light') {
+            codeMirrorInstance.getWrapperElement().style.background = '#272822';
+            codeMirrorInstance.getWrapperElement().style.color = '#f8f8f2';
+        } else {
+            codeMirrorInstance.getWrapperElement().style.background = '#f8f8f2';
+            codeMirrorInstance.getWrapperElement().style.color = '#272822';
+        }
     }
 
     saveSettings();
@@ -309,40 +484,77 @@ function toggleEditorMode() {
     isCodeMode = !isCodeMode;
     const modeBtn = document.getElementById('mode-toggle');
     const textEditor = document.getElementById('text-editor');
+    const textEditorTextarea = document.getElementById('text-editor-textarea');
+    const editorContainer = document.getElementById('editor-container');
 
     if (isCodeMode) {
         modeBtn.textContent = '💻';
         modeBtn.classList.add('active');
 
-        // Add code styling to textarea
-        textEditor.classList.add('code-mode');
+        // Sync content from contenteditable to textarea for CodeMirror
+        const currentContent = getEditorText();
+        if (textEditorTextarea) {
+            textEditorTextarea.value = currentContent;
+        }
 
-        // Initialize CodeMirror with Ubuntu terminal theme
+        // Hide contenteditable editor
+        textEditor.style.display = 'none';
+
+        // Initialize CodeMirror with theme based on current theme
         if (!codeMirrorInstance) {
-            codeMirrorInstance = CodeMirror.fromTextArea(textEditor, {
+            // Light theme uses dark monokai, dark theme uses light default
+            const codeTheme = currentTheme === 'light' ? 'monokai' : 'default';
+            
+            // Use the hidden textarea for CodeMirror
+            codeMirrorInstance = CodeMirror.fromTextArea(textEditorTextarea, {
                 lineNumbers: true,
                 mode: 'javascript',
-                theme: 'monokai',
+                theme: codeTheme,
                 indentUnit: 2,
                 tabSize: 2,
                 lineWrapping: true
             });
 
-            // Apply Ubuntu terminal styling
-            codeMirrorInstance.getWrapperElement().style.background = '#300a24';
+            // Apply styling based on theme
+            if (currentTheme === 'light') {
+                codeMirrorInstance.getWrapperElement().style.background = '#272822';
+                codeMirrorInstance.getWrapperElement().style.color = '#f8f8f2';
+            } else {
+                codeMirrorInstance.getWrapperElement().style.background = '#f8f8f2';
+                codeMirrorInstance.getWrapperElement().style.color = '#272822';
+            }
             codeMirrorInstance.getWrapperElement().style.fontFamily = "'Ubuntu Mono', 'Consolas', 'Monaco', monospace";
+            codeMirrorInstance.getWrapperElement().style.height = '100%';
 
             codeMirrorInstance.on('change', () => {
                 updateWordCount();
                 autoSave();
             });
+        } else {
+            // Update theme if CodeMirror already exists
+            const codeTheme = currentTheme === 'light' ? 'monokai' : 'default';
+            codeMirrorInstance.setOption('theme', codeTheme);
+            
+            // Update background and text colors
+            if (currentTheme === 'light') {
+                codeMirrorInstance.getWrapperElement().style.background = '#272822';
+                codeMirrorInstance.getWrapperElement().style.color = '#f8f8f2';
+            } else {
+                codeMirrorInstance.getWrapperElement().style.background = '#f8f8f2';
+                codeMirrorInstance.getWrapperElement().style.color = '#272822';
+            }
+            
+            // Sync content to CodeMirror
+            codeMirrorInstance.setValue(currentContent);
         }
 
+        // Show CodeMirror
         codeMirrorInstance.getWrapperElement().style.display = 'block';
-        textEditor.style.display = 'none';
-
-        // Focus CodeMirror
-        codeMirrorInstance.focus();
+        
+        // Focus CodeMirror after a small delay to ensure it's rendered
+        setTimeout(() => {
+            codeMirrorInstance.focus();
+        }, 50);
 
     } else {
         modeBtn.textContent = '📝';
@@ -352,11 +564,23 @@ function toggleEditorMode() {
         textEditor.classList.remove('code-mode');
 
         if (codeMirrorInstance) {
-            textEditor.value = codeMirrorInstance.getValue();
+            // Get content from CodeMirror
+            const codeContent = codeMirrorInstance.getValue();
+            
+            // Hide CodeMirror
             codeMirrorInstance.getWrapperElement().style.display = 'none';
-            textEditor.style.display = 'block';
+            
+            // Set content in contenteditable editor
+            setEditorText(codeContent);
         }
-        textEditor.focus();
+        
+        // Show contenteditable editor
+        textEditor.style.display = 'block';
+        
+        // Focus editor
+        setTimeout(() => {
+            textEditor.focus();
+        }, 50);
     }
 
     updateActiveTabContent();
@@ -364,51 +588,173 @@ function toggleEditorMode() {
 }
 
 function updateWordCount() {
-    let text = '';
-    if (isCodeMode && codeMirrorInstance) {
-        text = codeMirrorInstance.getValue();
-    } else {
-        text = document.getElementById('text-editor').value;
-    }
-
+    const text = getEditorText();
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     const chars = text.length;
-
     document.getElementById('word-count').textContent = `Words: ${words} | Characters: ${chars}`;
 }
 
 function autoSave() {
     clearTimeout(autoSaveTimeout);
     autoSaveTimeout = setTimeout(() => {
-        // Always update content first
-        updateActiveTabContent();
-        // Save immediately
-        if (!isLocked && isDataLoaded) {
-            saveToStorage();
-        } else if (isDataLoaded) {
-            // Even if locked, we should save (but this shouldn't happen in normal flow)
-            forceSaveToStorage();
+        if (!isDataLoaded) return;
+        
+        // Get fresh content from editor
+        const currentContent = getCurrentEditorContent();
+        
+        // Update active tab
+        const tab = tabs.find(t => t.id === activeTabId);
+        if (tab) {
+            tab.content = currentContent;
         }
+        
+        // Save if not locked
+        if (!isLocked) {
+            const data = {
+                tabs: tabs.map(t => ({
+                    id: t.id,
+                    name: t.name,
+                    content: t.id === activeTabId ? currentContent : (t.content || ''),
+                    font: t.font || "'Segoe UI', Arial, sans-serif",
+                    isCodeMode: t.isCodeMode || false
+                })),
+                activeTabId: activeTabId,
+                theme: currentTheme,
+                timestamp: new Date().toISOString()
+            };
+            chrome.storage.local.set({ editorData: data });
+        }
+        
         showSaveIndicator();
-    }, 500); // Reduced timeout for faster saves
+    }, 500);
+}
+
+// Helper function to get editor element
+function getEditorElement() {
+    return document.getElementById('text-editor');
+}
+
+// Helper function to check if editor is contenteditable
+function isEditorContentEditable() {
+    const editor = getEditorElement();
+    if (!editor) return false;
+    return editor.contentEditable === 'true' || editor.hasAttribute('contenteditable');
+}
+
+// Helper function to get text content (plain text) from editor
+function getEditorText() {
+    const editor = getEditorElement();
+    if (!editor) return '';
+    
+    if (isCodeMode && codeMirrorInstance) {
+        return codeMirrorInstance.getValue() || '';
+    }
+    
+    if (isEditorContentEditable()) {
+        // Get plain text from contenteditable
+        return editor.textContent || editor.innerText || '';
+    } else {
+        // Get text from textarea
+        return editor.value || '';
+    }
+}
+
+// Helper function to set text content in editor
+function setEditorText(text) {
+    const editor = getEditorElement();
+    if (!editor) return;
+    
+    if (isCodeMode && codeMirrorInstance) {
+        codeMirrorInstance.setValue(text || '');
+        return;
+    }
+    
+    if (isEditorContentEditable()) {
+        // Set text in contenteditable (as plain text)
+        editor.textContent = text || '';
+    } else {
+        // Set text in textarea
+        editor.value = text || '';
+    }
+}
+
+// Helper function to set HTML content in editor
+function setEditorHTML(html) {
+    const editor = getEditorElement();
+    if (!editor) return;
+    
+    if (isEditorContentEditable()) {
+        editor.innerHTML = html || '';
+    } else {
+        // For textarea, extract text from HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html || '';
+        editor.value = tempDiv.textContent || tempDiv.innerText || '';
+    }
+}
+
+// Get current content from editor - ALWAYS reads fresh content
+function getCurrentEditorContent() {
+    let content = '';
+    try {
+        if (isCodeMode && codeMirrorInstance) {
+            content = codeMirrorInstance.getValue() || '';
+        } else {
+            const editor = getEditorElement();
+            if (editor) {
+                if (isEditorContentEditable()) {
+                    // Get HTML content from contenteditable
+                    content = editor.innerHTML || '';
+                } else {
+                    // Get text from textarea
+                    content = editor.value || '';
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error reading editor content:', e);
+    }
+    return content;
 }
 
 // Force save function - saves regardless of lock status (used when locking)
 function forceSaveToStorage() {
-    // Always update content first, even if not loaded yet
-    updateActiveTabContent();
+    // CRITICAL: Get fresh content directly from editor
+    const currentContent = getCurrentEditorContent();
     
-    const data = {
-        tabs: tabs,
+    // Update the active tab with current content
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (tab) {
+        tab.content = currentContent;
+    } else if (tabs.length === 0) {
+        // Create default tab if none exists
+        tabs.push({ 
+            id: 0, 
+            name: 'Tab 1', 
+            content: currentContent, 
+            font: "'Segoe UI', Arial, sans-serif", 
+            isCodeMode: false 
+        });
+        activeTabId = 0;
+    }
+    
+    // Prepare data with current content
+    const dataToSave = {
+        tabs: tabs.map(t => ({
+            id: t.id,
+            name: t.name,
+            content: t.id === activeTabId ? currentContent : (t.content || ''),
+            font: t.font || "'Segoe UI', Arial, sans-serif",
+            isCodeMode: t.isCodeMode || false
+        })),
         activeTabId: activeTabId,
         theme: currentTheme,
         timestamp: new Date().toISOString()
     };
 
-    // Save immediately - don't wait for isDataLoaded when locking
-    chrome.storage.local.set({ editorData: data }, () => {
-        console.log('Data saved successfully', data);
-        isDataLoaded = true; // Mark as loaded after successful save
+    // Save immediately
+    chrome.storage.local.set({ editorData: dataToSave }, () => {
+        isDataLoaded = true;
     });
 }
 
@@ -418,9 +764,23 @@ function saveToStorage() {
     // Critical: Do not save if locked (prevents overwriting with hidden/empty state)
     if (isLocked) return;
 
-    updateActiveTabContent();
+    // Get fresh content from editor
+    const currentContent = getCurrentEditorContent();
+    
+    // Update active tab
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (tab) {
+        tab.content = currentContent;
+    }
+    
     const data = {
-        tabs: tabs,
+        tabs: tabs.map(t => ({
+            id: t.id,
+            name: t.name,
+            content: t.id === activeTabId ? currentContent : (t.content || ''),
+            font: t.font || "'Segoe UI', Arial, sans-serif",
+            isCodeMode: t.isCodeMode || false
+        })),
         activeTabId: activeTabId,
         theme: currentTheme,
         timestamp: new Date().toISOString()
@@ -431,55 +791,62 @@ function saveToStorage() {
 
 function loadSavedData() {
     chrome.storage.local.get(['editorData'], (result) => {
-        console.log('Loading saved data...');
         isDataLoaded = true; // Allow saving from now on
         
-        if (result.editorData) {
+        if (result.editorData && result.editorData.tabs && result.editorData.tabs.length > 0) {
             const data = result.editorData;
-            console.log('Found saved data. Tabs count:', data.tabs ? data.tabs.length : 0);
-
-            if (data.tabs && data.tabs.length > 0) {
-                // Restore tabs from saved data - CRITICAL: Replace tabs array completely
-                tabs = data.tabs.map(tab => ({
-                    id: tab.id || 0,
-                    name: tab.name || 'Tab 1',
-                    content: tab.content || '', // Ensure content is never undefined
-                    font: tab.font || "'Segoe UI', Arial, sans-serif",
-                    isCodeMode: tab.isCodeMode || false
-                }));
-                
-                activeTabId = data.activeTabId !== undefined ? data.activeTabId : (tabs.length > 0 ? tabs[0].id : 0);
-                nextTabId = tabs.length > 0 ? Math.max(...tabs.map(t => t.id), 0) + 1 : 1;
-                
-                console.log('Restored tabs count:', tabs.length);
-                console.log('Active tab ID:', activeTabId);
-                if (tabs.length > 0) {
-                    const activeTab = tabs.find(t => t.id === activeTabId);
-                    console.log('Active tab content length:', activeTab ? (activeTab.content ? activeTab.content.length : 0) : 0);
-                    console.log('Active tab content preview:', activeTab && activeTab.content ? activeTab.content.substring(0, 100) : 'empty');
-                }
-                
-                renderTabs();
-                // Use setTimeout to ensure DOM is ready
-                setTimeout(() => {
-                    switchTab(activeTabId);
-                }, 50);
-            } else {
-                // If no tabs in saved data, keep existing tabs or create default
-                console.log('No tabs in saved data');
-                if (tabs.length === 0) {
-                    tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
-                    renderTabs();
-                }
-            }
-
+            
+            // CRITICAL: Completely replace tabs array with saved data
+            tabs = data.tabs.map(tab => ({
+                id: tab.id || 0,
+                name: tab.name || 'Tab 1',
+                content: tab.content !== undefined ? tab.content : '', // Preserve empty strings
+                font: tab.font || "'Segoe UI', Arial, sans-serif",
+                isCodeMode: tab.isCodeMode || false
+            }));
+            
+            activeTabId = data.activeTabId !== undefined ? data.activeTabId : (tabs.length > 0 ? tabs[0].id : 0);
+            nextTabId = tabs.length > 0 ? Math.max(...tabs.map(t => t.id), 0) + 1 : 1;
+            
+            // Restore theme
             if (data.theme) {
                 currentTheme = data.theme;
                 document.body.className = `${currentTheme}-mode`;
             }
+            
+            // Render and switch to active tab
+            renderTabs();
+            
+            // Ensure DOM is ready before switching
+            setTimeout(() => {
+                const activeTab = tabs.find(t => t.id === activeTabId);
+                if (activeTab) {
+                    // Set content directly in editor (HTML if contenteditable)
+                    setEditorHTML(activeTab.content || '');
+                    
+                    const editor = getEditorElement();
+                    if (editor) {
+                        editor.style.fontFamily = activeTab.font || "'Segoe UI', Arial, sans-serif";
+                    }
+                    
+                    const fontSelect = document.getElementById('font-select');
+                    if (fontSelect) {
+                        fontSelect.value = activeTab.font || "'Segoe UI', Arial, sans-serif";
+                    }
+                    
+                    // Update CodeMirror if in code mode
+                    if (activeTab.isCodeMode && codeMirrorInstance) {
+                        codeMirrorInstance.setValue(activeTab.content || '');
+                    } else if (activeTab.isCodeMode !== isCodeMode) {
+                        // Toggle mode if needed
+                        toggleEditorMode();
+                    }
+                    
+                    updateWordCount();
+                }
+            }, 100);
         } else {
-            // No saved data - keep existing tabs if any, otherwise create default
-            console.log('No saved data found');
+            // No saved data - ensure we have at least one tab
             if (tabs.length === 0) {
                 tabs = [{ id: 0, name: 'Tab 1', content: '', font: "'Segoe UI', Arial, sans-serif", isCodeMode: false }];
                 renderTabs();
@@ -559,16 +926,15 @@ function switchTab(tabId) {
     const tab = tabs.find(t => t.id === tabId);
 
     if (!tab) {
-        console.error('Tab not found:', tabId);
         return;
     }
-
-    console.log('Switching to tab:', tabId, 'Content length:', tab.content ? tab.content.length : 0);
     
-    const textEditor = document.getElementById('text-editor');
-    if (textEditor) {
-        textEditor.value = tab.content || '';
-        textEditor.style.fontFamily = tab.font || "'Segoe UI', Arial, sans-serif";
+    // Set content in editor (HTML if contenteditable, text if textarea)
+    setEditorHTML(tab.content || '');
+    
+    const editor = getEditorElement();
+    if (editor) {
+        editor.style.fontFamily = tab.font || "'Segoe UI', Arial, sans-serif";
     }
     
     const fontSelect = document.getElementById('font-select');
@@ -632,8 +998,6 @@ function updateActiveTabContent() {
     const fontSelect = document.getElementById('font-select');
     tab.font = fontSelect ? fontSelect.value : "'Segoe UI', Arial, sans-serif";
     tab.isCodeMode = isCodeMode;
-    
-    console.log('Updated tab content:', { tabId: activeTabId, contentLength: content.length, content: content.substring(0, 50) });
 }
 
 function renderTabs() {
@@ -968,56 +1332,19 @@ function unlockFromModal() {
     const hash = CryptoJS.SHA256(password).toString();
 
     if (hash === passwordHash) {
-        // Lock the editor - Save data BEFORE setting isLocked
         // Clear any pending autosave
         clearTimeout(autoSaveTimeout);
         
-        // CRITICAL: Get content directly from editor before updating tab
-        let currentContent = '';
-        try {
-            if (isCodeMode && codeMirrorInstance) {
-                currentContent = codeMirrorInstance.getValue() || '';
-            } else {
-                const textEditor = document.getElementById('text-editor');
-                if (textEditor) {
-                    currentContent = textEditor.value || '';
-                }
-            }
-        } catch (e) {
-            console.error('Error reading content before lock:', e);
-        }
+        // CRITICAL: Save content IMMEDIATELY before locking
+        forceSaveToStorage();
         
-        // Update tab with current content
-        const tab = tabs.find(t => t.id === activeTabId);
-        if (tab) {
-            tab.content = currentContent;
-        }
-        
-        // Prepare data to save - make a deep copy
-        const dataToSave = {
-            tabs: tabs.map(t => ({
-                id: t.id,
-                name: t.name,
-                content: t.content || '',
-                font: t.font || "'Segoe UI', Arial, sans-serif",
-                isCodeMode: t.isCodeMode || false
-            })),
-            activeTabId: activeTabId,
-            theme: currentTheme,
-            timestamp: new Date().toISOString()
-        };
-        
-        // Save immediately with callback to ensure it completes
-        chrome.storage.local.set({ editorData: dataToSave }, () => {
-            console.log('Data saved before locking from modal');
-            // Now set locked state after save completes
+        // Set locked state
+        chrome.storage.local.set({ isLocked: true }, () => {
             isLocked = true;
-            chrome.storage.local.set({ isLocked: true }, () => {
-                document.getElementById('app-container').style.display = 'none';
-                showLockedScreen();
-                hideLockModal();
-                updateLockButton();
-            });
+            document.getElementById('app-container').style.display = 'none';
+            showLockedScreen();
+            hideLockModal();
+            updateLockButton();
         });
     } else {
         alert('❌ Wrong password!');
@@ -1027,70 +1354,18 @@ function unlockFromModal() {
 // New Direct Lock Function
 function tryLockEditor() {
     if (passwordHash) {
-        // Direct Lock - Save data BEFORE setting isLocked
         // Clear any pending autosave
         clearTimeout(autoSaveTimeout);
         
-        // CRITICAL: Get content directly from editor before updating tab
-        let currentContent = '';
-        try {
-            if (isCodeMode && codeMirrorInstance) {
-                currentContent = codeMirrorInstance.getValue() || '';
-            } else {
-                const textEditor = document.getElementById('text-editor');
-                if (textEditor) {
-                    currentContent = textEditor.value || '';
-                }
-            }
-        } catch (e) {
-            console.error('Error reading content before lock:', e);
-        }
+        // CRITICAL: Save content IMMEDIATELY before locking
+        forceSaveToStorage();
         
-        // Update tab with current content
-        const tab = tabs.find(t => t.id === activeTabId);
-        if (tab) {
-            tab.content = currentContent;
-            console.log('Locking - Current content length:', currentContent.length);
-            console.log('Locking - Current content preview:', currentContent.substring(0, 100));
-        }
-        
-        // Prepare data to save - make a deep copy to ensure we save current state
-        const dataToSave = {
-            tabs: tabs.map(t => ({
-                id: t.id,
-                name: t.name,
-                content: t.content || '',
-                font: t.font || "'Segoe UI', Arial, sans-serif",
-                isCodeMode: t.isCodeMode || false
-            })),
-            activeTabId: activeTabId,
-            theme: currentTheme,
-            timestamp: new Date().toISOString()
-        };
-        
-        console.log('Saving data before lock:', JSON.stringify(dataToSave).substring(0, 200));
-        
-        // Save immediately with callback to ensure it completes
-        chrome.storage.local.set({ editorData: dataToSave }, () => {
-            console.log('Data saved successfully before locking');
-            // Verify save
-            chrome.storage.local.get(['editorData'], (result) => {
-                console.log('Verified saved data:', result.editorData ? 'Data exists' : 'No data');
-                if (result.editorData && result.editorData.tabs) {
-                    console.log('Saved tabs count:', result.editorData.tabs.length);
-                    if (result.editorData.tabs.length > 0) {
-                        console.log('First tab content length:', result.editorData.tabs[0].content ? result.editorData.tabs[0].content.length : 0);
-                    }
-                }
-            });
-            
-            // Now set locked state after save completes
+        // Set locked state - use callback to ensure save completes first
+        chrome.storage.local.set({ isLocked: true }, () => {
             isLocked = true;
-            chrome.storage.local.set({ isLocked: true }, () => {
-                document.getElementById('app-container').style.display = 'none';
-                showLockedScreen();
-                updateLockButton();
-            });
+            document.getElementById('app-container').style.display = 'none';
+            showLockedScreen();
+            updateLockButton();
         });
     } else {
         // Show Setup Helper
